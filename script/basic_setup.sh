@@ -62,7 +62,7 @@ for port in 6443 10250 10257 2379 2380; do
 done
 log "INFO" "Tous les ports requis sont libres."
 
-# Étape 1 : Mettre à jour le système
+# Étape 1 : Mettre à jour le système (A voir : plutot avertir que exécuter !!!)
 log "INFO" "Étape 1 : Mise à jour du système"
 apt update >> "$LOG_FILE" 2>&1
 apt upgrade -y >> "$LOG_FILE" 2>&1
