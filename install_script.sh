@@ -37,7 +37,7 @@ show_banner() {
     echo -e "${CYAN}${BOLD}"
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║                    🚀 KUBERNETES INSTALLER                   ║"
-    echo "║                     Installation Automatisée                ║"
+    echo "║                     Installation Automatisée                 ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo
