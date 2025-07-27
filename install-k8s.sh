@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script d'installation Kubernetes avec interface interactive
+# Script d'installation Kubernetes avec interface interactive - VERSION CORRIGÉE
 # Supporte 3 modes : Node complet, Master seul, Worker seul
 
 set -euo pipefail
@@ -296,6 +296,27 @@ validate_worker_config() {
     print_status "  - Master IP : $MASTER_IP"
 }
 
+# Fonction de gestion d'erreur améliorée
+handle_error() {
+    local exit_code=$?
+    local line_number=$1
+    print_error "Erreur ligne $line_number (code: $exit_code)"
+    print_error "Consultez les logs : $LOG_FILE"
+    
+    # Proposer des solutions selon l'étape
+    case $line_number in
+        *) 
+            print_status "Pour nettoyer et recommencer :"
+            print_status "1. Exécutez le script de reset : sudo ./reset-k8s.sh"
+            print_status "2. Relancez l'installation"
+            ;;
+    esac
+    
+    exit $exit_code
+}
+
+trap 'handle_error $LINENO' ERR
+
 # Vérifications système
 check_prerequisites() {
     print_status "Vérification des prérequis système..."
@@ -308,7 +329,7 @@ check_prerequisites() {
     
     # Vérifier la connectivité internet
     if ! ping -c 1 8.8.8.8 &>/dev/null; then
-        print_warning "Connectivité internet limitée"
+        print_warning "Connectivité internet limitée - certaines étapes peuvent échouer"
     fi
     
     # Vérifier les outils requis
@@ -330,6 +351,16 @@ check_prerequisites() {
     local disk_space=$(df / | awk 'NR==2 {print $4}')
     if [[ $disk_space -lt 10000000 ]]; then  # 10GB
         print_warning "Espace disque faible (recommandé: 10GB+)"
+    fi
+    
+    # Vérifier si Kubernetes est déjà installé
+    if systemctl is-active --quiet kubelet 2>/dev/null; then
+        print_warning "Kubelet déjà actif - installation existante détectée"
+        read -p "Continuer quand même ? (oui/non): " continue_install
+        if [[ "$continue_install" != "oui" ]] && [[ "$continue_install" != "o" ]]; then
+            print_error "Installation annulée"
+            exit 1
+        fi
     fi
     
     print_success "Prérequis validés"
@@ -380,7 +411,7 @@ EOF
     print_success "Dépendances système configurées"
 }
 
-# Installation containerd
+# Installation containerd avec gestion d'erreurs
 install_containerd() {
     print_status "Installation de containerd..."
     
@@ -405,12 +436,22 @@ install_containerd() {
         mkdir -p /etc/containerd
         containerd config default > /etc/containerd/config.toml
         sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    else
+        print_error "Distribution non supportée"
+        exit 1
     fi
     
     # Démarrer et activer containerd
     systemctl daemon-reload
     systemctl enable containerd
-    systemctl start containerd
+    systemctl restart containerd
+    
+    # Vérifier que containerd fonctionne
+    if ! systemctl is-active --quiet containerd; then
+        print_error "Échec du démarrage de containerd"
+        systemctl status containerd
+        exit 1
+    fi
     
     print_success "Containerd installé et configuré"
 }
@@ -419,16 +460,20 @@ install_containerd() {
 install_k8s_tools() {
     print_status "Installation kubeadm, kubelet, kubectl..."
     
+    # Utiliser la version majeure.mineure du K8S_VERSION
+    local k8s_repo_version
+    k8s_repo_version=$(echo "$K8S_VERSION" | cut -d. -f1,2)
+    
     if command -v apt-get &> /dev/null; then
         # Ubuntu/Debian
         apt-get update
         apt-get install -y apt-transport-https ca-certificates curl gpg
         
         # Ajouter la clé GPG
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/deb/Release.key" | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         
         # Ajouter le dépôt
-        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
         
         apt-get update
         apt-get install -y kubelet="$K8S_VERSION-*" kubeadm="$K8S_VERSION-*" kubectl="$K8S_VERSION-*"
@@ -439,10 +484,10 @@ install_k8s_tools() {
         cat <<EOF > /etc/yum.repos.d/kubernetes.repo
 [kubernetes]
 name=Kubernetes
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
+baseurl=https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/rpm/
 enabled=1
 gpgcheck=1
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
+gpgkey=https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/rpm/repodata/repomd.xml.key
 EOF
         
         yum install -y kubelet-"$K8S_VERSION" kubeadm-"$K8S_VERSION" kubectl-"$K8S_VERSION" --disableexcludes=kubernetes
@@ -458,16 +503,20 @@ EOF
 install_worker_tools() {
     print_status "Installation kubelet et kubeadm pour worker..."
     
+    # Utiliser la version majeure.mineure du K8S_VERSION
+    local k8s_repo_version
+    k8s_repo_version=$(echo "$K8S_VERSION" | cut -d. -f1,2)
+    
     if command -v apt-get &> /dev/null; then
         # Ubuntu/Debian
         apt-get update
         apt-get install -y apt-transport-https ca-certificates curl gpg
         
         # Ajouter la clé GPG
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/deb/Release.key" | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         
         # Ajouter le dépôt
-        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
         
         apt-get update
         apt-get install -y kubelet="$K8S_VERSION-*" kubeadm="$K8S_VERSION-*"
@@ -478,10 +527,10 @@ install_worker_tools() {
         cat <<EOF > /etc/yum.repos.d/kubernetes.repo
 [kubernetes]
 name=Kubernetes
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
+baseurl=https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/rpm/
 enabled=1
 gpgcheck=1
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
+gpgkey=https://pkgs.k8s.io/core:/stable:/v${k8s_repo_version}/rpm/repodata/repomd.xml.key
 EOF
         
         yum install -y kubelet-"$K8S_VERSION" kubeadm-"$K8S_VERSION" --disableexcludes=kubernetes
@@ -493,7 +542,7 @@ EOF
     print_success "Outils worker installés"
 }
 
-# Initialisation du cluster K8s
+# Initialisation du cluster K8s avec gestion d'erreurs améliorée
 initialize_k8s_cluster() {
     print_status "Initialisation du cluster K8s..."
     
@@ -547,12 +596,33 @@ EOF
         setup_audit_policy
     fi
     
-    # Initialiser le cluster
-    if [[ "${HIGH_AVAILABILITY:-false}" == "true" ]]; then
-        kubeadm init --config=/tmp/kubeadm-config.yaml --upload-certs
-    else
-        kubeadm init --config=/tmp/kubeadm-config.yaml
-    fi
+    # Initialiser le cluster avec retry
+    local max_retries=3
+    local retry_count=0
+    
+    while [[ $retry_count -lt $max_retries ]]; do
+        print_status "Tentative d'initialisation $((retry_count + 1))/$max_retries..."
+        
+        if [[ "${HIGH_AVAILABILITY:-false}" == "true" ]]; then
+            if kubeadm init --config=/tmp/kubeadm-config.yaml --upload-certs; then
+                break
+            fi
+        else
+            if kubeadm init --config=/tmp/kubeadm-config.yaml; then
+                break
+            fi
+        fi
+        
+        ((retry_count++))
+        if [[ $retry_count -lt $max_retries ]]; then
+            print_warning "Initialisation échouée, nouvelle tentative dans 10 secondes..."
+            sleep 10
+        else
+            print_error "Échec de l'initialisation après $max_retries tentatives"
+            print_status "Vérifiez les logs : journalctl -xeu kubelet"
+            exit 1
+        fi
+    done
     
     # Configurer kubectl
     mkdir -p "$INSTALL_PATH"
@@ -573,14 +643,43 @@ join_k8s_cluster() {
     local join_cmd="kubeadm join $MASTER_IP --token $JOIN_TOKEN --discovery-token-ca-cert-hash $CA_CERT_HASH"
     
     print_status "Exécution de: $join_cmd"
-    $join_cmd
     
-    print_success "Worker rejoint le cluster avec succès"
+    # Retry logic pour la jointure
+    local max_retries=3
+    local retry_count=0
+    
+    while [[ $retry_count -lt $max_retries ]]; do
+        if $join_cmd; then
+            print_success "Worker rejoint le cluster avec succès"
+            return 0
+        fi
+        
+        ((retry_count++))
+        if [[ $retry_count -lt $max_retries ]]; then
+            print_warning "Jointure échouée, nouvelle tentative dans 10 secondes..."
+            sleep 10
+        else
+            print_error "Échec de la jointure après $max_retries tentatives"
+            exit 1
+        fi
+    done
 }
 
 # Autoriser les workloads sur le master (pour mode node)
 allow_master_workload() {
     print_status "Configuration du mode single-node (Master+Worker)..."
+    
+    # Attendre que le cluster soit prêt
+    local max_wait=60
+    local wait_count=0
+    
+    while [[ $wait_count -lt $max_wait ]]; do
+        if kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes &>/dev/null; then
+            break
+        fi
+        ((wait_count++))
+        sleep 2
+    done
     
     # Supprimer le taint qui empêche les pods sur le master
     kubectl --kubeconfig="$KUBECONFIG_FILE" taint nodes --all node-role.kubernetes.io/control-plane- || true
@@ -588,24 +687,51 @@ allow_master_workload() {
     print_success "Master configuré pour accepter les workloads"
 }
 
-# Installation du plugin réseau
+# Installation du plugin réseau avec retry
 install_network_plugin() {
     print_status "Installation du plugin réseau : $NETWORK_PLUGIN..."
     
-    case "$NETWORK_PLUGIN" in
-        "flannel")
-            kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-            ;;
-        "calico")
-            kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml
-            ;;
-        "cilium")
-            curl -L --remote-name-all https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz{,.sha256sum}
-            sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
-            tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
-            cilium install
-            ;;
-    esac
+    local max_retries=3
+    local retry_count=0
+    
+    while [[ $retry_count -lt $max_retries ]]; do
+        case "$NETWORK_PLUGIN" in
+            "flannel")
+                if kubectl --kubeconfig="$KUBECONFIG_FILE" apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml; then
+                    break
+                fi
+                ;;
+            "calico")
+                if kubectl --kubeconfig="$KUBECONFIG_FILE" apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml; then
+                    break
+                fi
+                ;;
+            "cilium")
+                # Installation Cilium CLI
+                if ! command -v cilium &> /dev/null; then
+                    curl -L --remote-name-all https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz{,.sha256sum}
+                    sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
+                    tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
+                fi
+                if cilium install; then
+                    break
+                fi
+                ;;
+            *)
+                print_error "Plugin réseau non supporté : $NETWORK_PLUGIN"
+                exit 1
+                ;;
+        esac
+        
+        ((retry_count++))
+        if [[ $retry_count -lt $max_retries ]]; then
+            print_warning "Installation du plugin réseau échouée, nouvelle tentative..."
+            sleep 10
+        else
+            print_error "Échec de l'installation du plugin réseau après $max_retries tentatives"
+            exit 1
+        fi
+    done
     
     print_success "Plugin réseau $NETWORK_PLUGIN installé"
 }
@@ -638,11 +764,23 @@ save_master_info() {
     print_status "Génération des informations de jointure..."
     
     # Attendre que le cluster soit prêt
-    sleep 10
+    local max_wait=60
+    local wait_count=0
+    
+    while [[ $wait_count -lt $max_wait ]]; do
+        if kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes &>/dev/null; then
+            break
+        fi
+        ((wait_count++))
+        sleep 2
+    done
     
     # Générer un nouveau token (valable 24h)
-    local join_token=$(kubeadm token create --ttl=24h0m0s)
-    local ca_cert_hash=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //')
+    local join_token
+    join_token=$(kubeadm token create --ttl=24h0m0s)
+    
+    local ca_cert_hash
+    ca_cert_hash=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //')
     
     # Sauvegarder dans le fichier d'infos condensées
     cat <<EOF > "$MASTER_INFO_FILE"
@@ -658,7 +796,8 @@ CA_CERT_HASH="sha256:$ca_cert_hash"
 
 # Pour ajouter un master en HA, utilisez aussi :
 $(if [[ "${HIGH_AVAILABILITY:-false}" == "true" ]]; then
-    local certificate_key=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -n 1)
+    local certificate_key
+    certificate_key=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -n 1)
     echo "CERTIFICATE_KEY=\"$certificate_key\""
     echo "# Commande jointure master HA :"
     echo "# kubeadm join $NODE_IP --token $join_token --discovery-token-ca-cert-hash sha256:$ca_cert_hash --control-plane --certificate-key $certificate_key"
@@ -670,7 +809,8 @@ EOF
     chmod +x "$INSTALL_PATH/join-worker.sh"
     
     if [[ "${HIGH_AVAILABILITY:-false}" == "true" ]]; then
-        local certificate_key=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -n 1)
+        local certificate_key
+        certificate_key=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -n 1)
         echo "kubeadm join $NODE_IP --token $join_token --discovery-token-ca-cert-hash sha256:$ca_cert_hash --control-plane --certificate-key $certificate_key" > "$INSTALL_PATH/join-master.sh"
         chmod +x "$INSTALL_PATH/join-master.sh"
     fi
@@ -726,30 +866,38 @@ EOF
     print_success "Backup etcd automatique configuré (quotidien à 2h)"
 }
 
-# Attente du cluster
+# Attente du cluster avec timeout et retry
 wait_for_cluster() {
     print_status "Attente de la disponibilité du cluster..."
     
-    local max_attempts=60
+    local max_attempts=120  # Augmenté à 10 minutes
     local attempt=0
     
     while [[ $attempt -lt $max_attempts ]]; do
         if kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes &>/dev/null; then
-            print_success "Cluster opérationnel !"
-            kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes
-            return 0
+            # Vérifier que le node est Ready
+            if kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes | grep -q "Ready"; then
+                print_success "Cluster opérationnel !"
+                kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes
+                return 0
+            fi
         fi
         
         ((attempt++))
-        print_status "Tentative $attempt/$max_attempts..."
+        if [[ $((attempt % 10)) -eq 0 ]]; then
+            print_status "Tentative $attempt/$max_attempts... (patientez, initialisation en cours)"
+        fi
         sleep 5
     done
     
-    print_error "Timeout : cluster non disponible"
+    print_error "Timeout : cluster non disponible après $((max_attempts * 5)) secondes"
+    print_status "Diagnostic :"
+    kubectl --kubeconfig="$KUBECONFIG_FILE" get nodes 2>&1 || true
+    kubectl --kubeconfig="$KUBECONFIG_FILE" get pods -A 2>&1 || true
     return 1
 }
 
-# Création du script kubectl
+# Création du script kubectl avec diagnostic intégré
 create_kubectl_script() {
     print_status "Création du script kubectl personnalisé..."
     
@@ -763,15 +911,47 @@ export KUBECONFIG="$KUBECONFIG_FILE"
 check_cluster() {
     if ! kubectl get nodes &>/dev/null; then
         echo "Erreur : Cluster K8s non disponible"
+        echo "Tentative de diagnostic..."
+        
+        # Vérifier les services
+        systemctl is-active kubelet containerd || true
+        
+        # Vérifier les processus
+        if ! pgrep -f kube-apiserver >/dev/null; then
+            echo "API Server non démarré"
+        fi
+        
+        return 1
+    fi
+    return 0
+}
+
+# Fonction d'auto-réparation
+auto_repair() {
+    echo "Tentative de réparation automatique..."
+    
+    # Redémarrer les services
+    systemctl restart kubelet 2>/dev/null || true
+    systemctl restart containerd 2>/dev/null || true
+    
+    # Attendre un peu
+    sleep 10
+    
+    # Revérifier
+    if check_cluster; then
+        echo "Réparation réussie !"
+        return 0
+    else
+        echo "Réparation échouée. Consultez les logs :"
+        echo "  sudo journalctl -xeu kubelet"
+        echo "  sudo journalctl -xeu containerd"
         return 1
     fi
 }
 
 # Vérifier le cluster avant d'exécuter la commande
 if ! check_cluster; then
-    echo "Tentative de redémarrage des services..."
-    systemctl restart kubelet 2>/dev/null || true
-    sleep 3
+    auto_repair || exit 1
 fi
 
 # Exécuter kubectl avec les arguments passés
@@ -779,10 +959,28 @@ kubectl "\$@"
 EOF
     
     chmod +x "$KUBECTL_SCRIPT"
-    print_success "Script kubectl créé : $KUBECTL_SCRIPT"
+    
+    # Créer aussi un alias plus simple (optionnel)
+    cat <<EOF > "$INSTALL_PATH/setup-kubectl.sh"
+#!/bin/bash
+# Script pour configurer kubectl en mode standard
+
+mkdir -p ~/.kube
+cp "$KUBECONFIG_FILE" ~/.kube/config
+chown \$(id -u):\$(id -g) ~/.kube/config
+
+echo "Kubectl configuré en mode standard"
+echo "Vous pouvez maintenant utiliser : kubectl get nodes"
+EOF
+    
+    chmod +x "$INSTALL_PATH/setup-kubectl.sh"
+    
+    print_success "Scripts kubectl créés :"
+    print_status "  - Script personnalisé : $KUBECTL_SCRIPT"
+    print_status "  - Setup standard : $INSTALL_PATH/setup-kubectl.sh"
 }
 
-# Tests du cluster
+# Tests du cluster avec diagnostics détaillés
 test_cluster() {
     print_status "Tests du cluster K8s..."
     
@@ -791,20 +989,43 @@ test_cluster() {
         print_success "✅ Nœuds opérationnels"
     else
         print_warning "⚠️ Problème détecté avec les nœuds"
+        "$KUBECTL_SCRIPT" get nodes || true
     fi
     
     # Test des pods système
-    if "$KUBECTL_SCRIPT" get pods -n kube-system | grep -q "Running"; then
-        print_success "✅ Pods système fonctionnels"
+    local system_pods_ready=0
+    local total_system_pods=0
+    
+    if "$KUBECTL_SCRIPT" get pods -n kube-system &>/dev/null; then
+        system_pods_ready=$("$KUBECTL_SCRIPT" get pods -n kube-system --no-headers | grep -c "Running" || echo "0")
+        total_system_pods=$("$KUBECTL_SCRIPT" get pods -n kube-system --no-headers | wc -l || echo "0")
+        
+        if [[ $system_pods_ready -gt 0 ]]; then
+            print_success "✅ Pods système fonctionnels ($system_pods_ready/$total_system_pods)"
+        else
+            print_warning "⚠️ Aucun pod système en fonctionnement"
+        fi
     else
-        print_warning "⚠️ Problème avec les pods système"
+        print_warning "⚠️ Impossible d'accéder aux pods système"
     fi
     
     # Test de déploiement (seulement pour master et node)
     if [[ "$MODE" == "master" ]] || [[ "$MODE" == "node" ]]; then
         print_status "Test de déploiement simple..."
-        "$KUBECTL_SCRIPT" run test-nginx --image=nginx --rm -it --restart=Never -- echo "Test OK" 2>/dev/null || true
+        if "$KUBECTL_SCRIPT" run test-nginx --image=nginx --rm -it --restart=Never --timeout=30s -- echo "Test OK" 2>/dev/null; then
+            print_success "✅ Test de déploiement réussi"
+        else
+            print_warning "⚠️ Test de déploiement échoué (normal si pas encore prêt)"
+        fi
     fi
+    
+    # Afficher l'état global
+    echo
+    print_status "État du cluster :"
+    "$KUBECTL_SCRIPT" get nodes -o wide 2>/dev/null || true
+    echo
+    print_status "Pods système :"
+    "$KUBECTL_SCRIPT" get pods -n kube-system 2>/dev/null || true
     
     print_success "Tests terminés"
 }
@@ -821,11 +1042,11 @@ install_node_mode() {
     # Initialisation du cluster
     initialize_k8s_cluster
     
+    # Installation du réseau (avant de permettre les workloads)
+    install_network_plugin
+    
     # Configuration single-node
     allow_master_workload
-    
-    # Installation du réseau
-    install_network_plugin
     
     print_success "Installation Node terminée"
 }
@@ -869,7 +1090,7 @@ install_worker_mode() {
     print_success "Installation Worker terminée"
 }
 
-# Affichage des informations finales
+# Affichage des informations finales avec diagnostics
 show_final_info() {
     echo
     print_header "=============================================="
@@ -887,12 +1108,22 @@ show_final_info() {
             log "📁 ${BOLD}Fichiers importants :${NC}"
             log "   - Kubeconfig : $KUBECONFIG_FILE"
             log "   - Script kubectl : $KUBECTL_SCRIPT"
+            log "   - Setup standard : $INSTALL_PATH/setup-kubectl.sh"
             log "   - Logs : $LOG_FILE"
             echo
             log "🚀 ${BOLD}Utilisation :${NC}"
+            log "   # Méthode 1 : Script personnalisé"
             log "   $KUBECTL_SCRIPT get nodes"
             log "   $KUBECTL_SCRIPT get pods --all-namespaces"
+            echo
+            log "   # Méthode 2 : Setup standard"
+            log "   $INSTALL_PATH/setup-kubectl.sh"
+            log "   kubectl get nodes"
+            echo
+            log "🧪 ${BOLD}Tests rapides :${NC}"
             log "   $KUBECTL_SCRIPT run nginx --image=nginx"
+            log "   $KUBECTL_SCRIPT get pods"
+            log "   $KUBECTL_SCRIPT delete pod nginx"
             echo
             log "✨ ${GREEN}Cluster single-node prêt ! Vous pouvez déployer vos applications.${NC}"
             ;;
@@ -907,6 +1138,7 @@ show_final_info() {
             log "📁 ${BOLD}Fichiers importants :${NC}"
             log "   - Kubeconfig : $KUBECONFIG_FILE"
             log "   - Script kubectl : $KUBECTL_SCRIPT"
+            log "   - Setup standard : $INSTALL_PATH/setup-kubectl.sh"
             log "   - Infos jointure : $MASTER_INFO_FILE"
             log "   - Script worker : $INSTALL_PATH/join-worker.sh"
             if [[ "${HIGH_AVAILABILITY:-false}" == "true" ]]; then
@@ -947,13 +1179,57 @@ show_final_info() {
     esac
     
     echo
+    # Afficher un résumé de l'état du cluster
+    if [[ "$MODE" != "worker" ]]; then
+        log "📊 ${BOLD}État actuel du cluster :${NC}"
+        "$KUBECTL_SCRIPT" get nodes 2>/dev/null || echo "   Cluster non accessible"
+        echo
+        log "🔍 ${BOLD}Pour surveiller l'état en temps réel :${NC}"
+        log "   watch '$KUBECTL_SCRIPT get pods -A'"
+    fi
+    
     print_header "=============================================="
 }
 
-# Fonction principale
+# Fonction de diagnostic post-installation
+post_install_diagnostics() {
+    if [[ "$MODE" == "worker" ]]; then
+        return 0
+    fi
+    
+    print_status "Diagnostic post-installation..."
+    
+    # Vérifier les pods système
+    local pending_pods
+    pending_pods=$("$KUBECTL_SCRIPT" get pods -A --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l || echo "0")
+    
+    if [[ $pending_pods -gt 0 ]]; then
+        print_warning "Il y a $pending_pods pod(s) en attente"
+        print_status "Ceci est normal pendant les premières minutes après l'installation"
+    fi
+    
+    # Conseils selon l'état
+    local ready_nodes
+    ready_nodes=$("$KUBECTL_SCRIPT" get nodes --no-headers 2>/dev/null | grep -c "Ready" || echo "0")
+    
+    if [[ $ready_nodes -eq 0 ]]; then
+        print_warning "Aucun nœud Ready détecté"
+        print_status "Patientez quelques minutes puis vérifiez avec :"
+        print_status "  $KUBECTL_SCRIPT get nodes"
+        print_status "  $KUBECTL_SCRIPT get pods -A"
+    fi
+}
+
+# Fonction principale avec gestion d'erreurs complète
 main() {
     # Initialiser le log
     touch "$LOG_FILE" 2>/dev/null || LOG_FILE="$SCRIPT_DIR/install-$TIMESTAMP.log"
+    
+    # Rediriger toutes les erreurs vers le log
+    exec 2> >(tee -a "$LOG_FILE" >&2)
+    
+    print_status "Démarrage de l'installation Kubernetes"
+    print_status "Log : $LOG_FILE"
     
     # Banner et sélection du mode
     show_banner
@@ -980,9 +1256,11 @@ main() {
             if wait_for_cluster; then
                 create_kubectl_script
                 test_cluster
+                post_install_diagnostics
                 show_final_info
             else
                 print_error "Échec de l'installation Node"
+                print_status "Consultez les logs pour plus de détails : $LOG_FILE"
                 exit 1
             fi
             ;;
@@ -991,9 +1269,11 @@ main() {
             if wait_for_cluster; then
                 create_kubectl_script
                 test_cluster
+                post_install_diagnostics
                 show_final_info
             else
                 print_error "Échec de l'installation Master"
+                print_status "Consultez les logs pour plus de détails : $LOG_FILE"
                 exit 1
             fi
             ;;
@@ -1007,6 +1287,16 @@ main() {
     echo
     print_success "🎉 Installation $MODE terminée avec succès !"
     print_status "📋 Consultez les logs détaillés : $LOG_FILE"
+    
+    # Message final selon le mode
+    case $MODE in
+        "node"|"master")
+            echo
+            print_status "🚀 Pour utiliser votre cluster :"
+            print_status "   Option 1 (Recommandée) : $INSTALL_PATH/setup-kubectl.sh && kubectl get nodes"
+            print_status "   Option 2 (Avancée) : $KUBECTL_SCRIPT get nodes"
+            ;;
+    esac
 }
 
 # Point d'entrée
