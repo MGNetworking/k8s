@@ -88,18 +88,27 @@ ip link delete flannel.1 2>/dev/null || true
 ip link delete cni0 2>/dev/null || true
 ip link delete docker0 2>/dev/null || true
 
-# 9. Nettoyer les règles iptables
-print_status "Nettoyage des règles iptables..."
-iptables -F 2>/dev/null || true
-iptables -t nat -F 2>/dev/null || true
-iptables -t mangle -F 2>/dev/null || true
-iptables -X 2>/dev/null || true
-iptables -t nat -X 2>/dev/null || true
-iptables -t mangle -X 2>/dev/null || true
+# 9. Nettoyer SEULEMENT les règles iptables Kubernetes (SÉCURISÉ)
+print_status "Nettoyage sélectif des règles iptables..."
+# NE PAS faire de flush complet pour préserver SSH !
 
-# 10. Nettoyer les routes
-print_status "Nettoyage des routes..."
-ip route flush table main 2>/dev/null || true
+# Supprimer seulement les chaînes Kubernetes spécifiques
+iptables -t nat -F KUBE-SERVICES 2>/dev/null || true
+iptables -t nat -X KUBE-SERVICES 2>/dev/null || true
+iptables -t nat -F KUBE-NODEPORTS 2>/dev/null || true
+iptables -t nat -X KUBE-NODEPORTS 2>/dev/null || true
+iptables -t nat -F KUBE-POSTROUTING 2>/dev/null || true
+iptables -t nat -X KUBE-POSTROUTING 2>/dev/null || true
+
+iptables -F KUBE-FORWARD 2>/dev/null || true
+iptables -X KUBE-FORWARD 2>/dev/null || true
+
+# 10. Nettoyer SEULEMENT les routes Kubernetes (SÉCURISÉ)
+print_status "Nettoyage sélectif des routes..."
+# Supprimer seulement les routes vers les subnets Kubernetes
+ip route del 10.244.0.0/16 2>/dev/null || true
+ip route del 10.96.0.0/16 2>/dev/null || true
+# NE PAS faire de flush complet !
 
 # 11. Nettoyer les namespaces réseau
 print_status "Nettoyage des namespaces réseau..."
@@ -114,4 +123,62 @@ journalctl --vacuum-time=1s 2>/dev/null || true
 
 # 13. Nettoyer les packages si demandé
 echo
-read -p "Voulez-vous aussi d
+read -p "Voulez-vous aussi désinstaller les packages K8s ? (oui/non): " remove_packages
+
+if [[ "$remove_packages" == "oui" ]] || [[ "$remove_packages" == "o" ]] || [[ "$remove_packages" == "yes" ]] || [[ "$remove_packages" == "y" ]]; then
+    print_status "Désinstallation des packages Kubernetes..."
+    
+    # Ubuntu/Debian
+    if command -v apt-get &> /dev/null; then
+        apt-mark unhold kubelet kubeadm kubectl 2>/dev/null || true
+        apt-get remove -y kubelet kubeadm kubectl 2>/dev/null || true
+        apt-get autoremove -y 2>/dev/null || true
+    fi
+    
+    # RHEL/CentOS
+    if command -v yum &> /dev/null; then
+        yum remove -y kubelet kubeadm kubectl 2>/dev/null || true
+    fi
+    
+    print_success "Packages Kubernetes désinstallés"
+fi
+
+# 14. Redémarrer les services
+print_status "Redémarrage des services..."
+systemctl start containerd 2>/dev/null || true
+systemctl enable containerd 2>/dev/null || true
+
+# 15. Nettoyer les répertoires de logs spécifiques
+print_status "Nettoyage final..."
+rm -rf /var/log/kubernetes/ 2>/dev/null || true
+rm -rf /var/log/pods/ 2>/dev/null || true
+
+# 16. Remettre le swap (si il était activé)
+print_status "Vérification du swap..."
+if [[ -f /swapfile ]] || [[ -f /swap.img ]] || swapon --show | grep -q "/"; then
+    read -p "Voulez-vous réactiver le swap ? (oui/non): " enable_swap
+    if [[ "$enable_swap" == "oui" ]] || [[ "$enable_swap" == "o" ]]; then
+        swapon -a 2>/dev/null || true
+        print_success "Swap réactivé"
+    fi
+fi
+
+echo
+print_success "================================"
+print_success "   RESET TERMINÉ AVEC SUCCÈS"
+print_success "================================"
+echo
+print_status "Système nettoyé et prêt pour une nouvelle installation"
+print_status "Vous pouvez maintenant relancer votre script d'installation"
+echo
+print_warning "REDÉMARRAGE RECOMMANDÉ pour s'assurer que tout est propre"
+echo
+read -p "Voulez-vous redémarrer maintenant ? (oui/non): " reboot_now
+
+if [[ "$reboot_now" == "oui" ]] || [[ "$reboot_now" == "o" ]] || [[ "$reboot_now" == "yes" ]] || [[ "$reboot_now" == "y" ]]; then
+    print_status "Redémarrage dans 5 secondes..."
+    sleep 5
+    reboot
+else
+    print_warning "N'oubliez pas de redémarrer manuellement !"
+fi
