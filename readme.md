@@ -47,6 +47,7 @@ Ce script permet de déployer Kubernetes dans 3 configurations différentes selo
 k8s-installer/
 ├── install-k8s.sh                    # Script principal d'installation
 ├── reset-k8s.sh                      # Script de reset/nettoyage
+├── verify.sh                         # Script de vérification générique
 ├── README.md                         # Cette documentation
 ├── nodeConfig/                       # Configurations Mode 1
 │   ├── dev-node.conf                # Dev/test single-node
@@ -97,7 +98,7 @@ k8s-installer/
 ```bash
 git clone <votre-repo>
 cd k8s-installer
-chmod +x install-k8s.sh reset-k8s.sh
+chmod +x install-k8s.sh reset-k8s.sh verify.sh
 ```
 
 ### 2. Créer la structure des configurations
@@ -114,6 +115,12 @@ Copiez les exemples fournis ou créez vos propres fichiers `.conf` dans les bons
 
 ```bash
 sudo ./install-k8s.sh
+```
+
+### 5. Vérifier l'installation
+
+```bash
+./verify.sh
 ```
 
 Le script vous guidera interactivement ! 🎯
@@ -317,6 +324,41 @@ sudo ./install-k8s.sh
 - ✅ Logs détaillés
 - ✅ Génération de scripts kubectl personnalisés
 
+### Script de vérification générique
+
+```bash
+./verify.sh
+```
+
+**Fonctionnalités :**
+
+- ✅ Détection automatique des installations K8s
+- ✅ Support de multiples installations simultanées
+- ✅ Récupération automatique de la configuration d'origine
+- ✅ Vérification rapide (2 min) ou complète (5 min)
+- ✅ Tests adaptés selon le mode d'installation
+- ✅ Diagnostic intégré et auto-réparation
+- ✅ Interface interactive ou utilisation en ligne de commande
+
+**Modes d'utilisation :**
+
+```bash
+# Mode interactif (recommandé)
+./verify.sh
+
+# Vérification rapide directe
+./verify.sh quick
+
+# Vérification complète directe
+./verify.sh full
+
+# Détection des installations seulement
+./verify.sh detect
+
+# Aide
+./verify.sh help
+```
+
 ### Script de reset/nettoyage
 
 ```bash
@@ -354,10 +396,15 @@ sudo ./install-k8s.sh
 # Choisir: 1 (Node complet)
 # Choisir: dev-local.conf
 
-# 3. Utiliser le cluster (méthode 1)
+# 3. Vérifier l'installation
+./verify.sh quick
+# Ou vérification complète
+./verify.sh full
+
+# 4. Utiliser le cluster (méthode 1)
 /opt/k8s-dev/kubectl.sh get nodes
 
-# 3. Ou utiliser le cluster (méthode 2 - standard)
+# 4. Ou utiliser le cluster (méthode 2 - standard)
 /opt/k8s-dev/setup-kubectl.sh
 kubectl get nodes
 ```
@@ -382,7 +429,10 @@ sudo ./install-k8s.sh
 # Choisir: 2 (Master seul)
 # Choisir: prod-master-01.conf
 
-# 3. Récupérer les infos de jointure
+# 3. Vérifier l'installation master
+./verify.sh full
+
+# 4. Récupérer les infos de jointure
 cat master-info-*.txt
 ```
 
@@ -401,6 +451,10 @@ EOF
 sudo ./install-k8s.sh
 # Choisir: 3 (Worker seul)
 # Choisir: prod-worker-01.conf
+
+# 3. Vérifier depuis le master que le worker a rejoint
+# (sur le master)
+kubectl get nodes
 ```
 
 ### Scénario 3 : Reset complet pour réinstallation
@@ -413,6 +467,27 @@ sudo ./reset-k8s.sh
 
 # 2. Réinstaller proprement
 sudo ./install-k8s.sh
+
+# 3. Vérifier la nouvelle installation
+./verify.sh
+```
+
+### Scénario 4 : Gestion de multiples installations
+
+```bash
+# Si vous avez plusieurs installations (dev, test, prod)
+./verify.sh
+
+# Le script détectera automatiquement:
+# [INFO] Plusieurs installations détectées :
+#   1. k8s-dev (/opt/k8s-dev)
+#   2. k8s-test (/opt/k8s-test)
+#   3. k8s-prod (/opt/k8s-prod)
+#
+# Choisissez l'installation à vérifier [1-3]: 2
+
+# Ou vérifier une installation spécifique en mode direct
+./verify.sh full  # Suivre le menu pour choisir
 ```
 
 ## 📄 Fichiers générés
@@ -420,19 +495,19 @@ sudo ./install-k8s.sh
 ### Scripts kubectl
 
 ```bash
-/opt/k8s/kubectl.sh               # Script kubectl avec auto-diagnostic
-/opt/k8s/setup-kubectl.sh         # Configuration kubectl standard
+/opt/k8s*/kubectl.sh               # Script kubectl avec auto-diagnostic
+/opt/k8s*/setup-kubectl.sh         # Configuration kubectl standard
 ```
 
 **Utilisation :**
 
 ```bash
 # Méthode 1 : Script personnalisé (recommandé pour debug)
-/opt/k8s/kubectl.sh get nodes
-/opt/k8s/kubectl.sh get pods -A
+/opt/k8s-dev/kubectl.sh get nodes
+/opt/k8s-dev/kubectl.sh get pods -A
 
 # Méthode 2 : Configuration standard
-/opt/k8s/setup-kubectl.sh
+/opt/k8s-dev/setup-kubectl.sh
 kubectl get nodes
 kubectl get pods -A
 ```
@@ -466,178 +541,232 @@ CA_CERT_HASH="sha256:abc123def456..."
 ### Scripts de maintenance
 
 ```bash
-/opt/k8s/join-worker.sh           # Script de jointure worker
-/opt/k8s/join-master.sh           # Script de jointure master HA
-/opt/k8s/backup-etcd.sh           # Script de backup etcd
+/opt/k8s*/join-worker.sh           # Script de jointure worker
+/opt/k8s*/join-master.sh           # Script de jointure master HA
+/opt/k8s*/backup-etcd.sh           # Script de backup etcd
 ```
 
 ### Fichiers de configuration
 
 ```bash
-/opt/k8s/kubeconfig.yaml          # Configuration kubectl
+/opt/k8s*/kubeconfig.yaml          # Configuration kubectl
 ```
 
 ## ✅ Vérification d'installation
 
-### Commandes de vérification post-installation
+### Script de vérification générique - verify.sh
+
+Le script `verify.sh` est l'outil principal pour vérifier vos installations Kubernetes. Il s'adapte automatiquement à votre configuration et détecte tous vos clusters installés.
+
+#### Interface interactive
+
+```bash
+./verify.sh
+```
+
+```bash
+╔══════════════════════════════════════════════════════════════╗
+║                  🔍 VÉRIFICATION KUBERNETES                  ║
+╚══════════════════════════════════════════════════════════════╝
+
+Choisissez le type de vérification :
+
+1. Vérification rapide (2 minutes)
+   → Tests essentiels : nœuds, services, déploiement simple
+
+2. Vérification complète (5 minutes)
+   → Tests approfondis : réseau, DNS, déploiements avancés
+
+3. Détection seulement
+   → Affiche les installations trouvées sans tests
+
+Votre choix [1-3]: _
+```
+
+#### Utilisation en ligne de commande
+
+```bash
+# Vérification rapide (2 minutes)
+./verify.sh quick
+
+# Vérification complète (5 minutes)
+./verify.sh full
+
+# Détection des installations seulement
+./verify.sh detect
+
+# Aide
+./verify.sh help
+```
+
+#### Détection automatique
+
+Le script détecte automatiquement :
+
+- **Toutes les installations** dans `/opt/k8s*`
+- **Les fichiers requis** (`kubectl.sh`, `kubeconfig.yaml`)
+- **La configuration d'origine** via les logs d'installation
+- **Le mode d'installation** (Node/Master/Worker)
+- **Les variables de configuration** (version K8s, plugin réseau, etc.)
+
+#### Exemple de vérification rapide
+
+```bash
+$ ./verify.sh quick
+
+🔍 VÉRIFICATION RAPIDE KUBERNETES
+=================================
+
+[INFO] Recherche des installations Kubernetes...
+[SUCCESS] Installation détectée : /opt/k8s-dev
+[SUCCESS] Configuration trouvée : Node avec dev-node.conf
+[SUCCESS] Variables chargées depuis ./nodeConfig/dev-node.conf
+[INFO]   - K8S_VERSION: 1.28.0
+[INFO]   - NETWORK_PLUGIN: flannel
+[INFO]   - CONTAINER_RUNTIME: containerd
+
+[INFO] Utilisation de : /opt/k8s-dev/kubectl.sh
+
+1️⃣ Nœuds du cluster:
+NAME   STATUS   ROLES           AGE   VERSION
+k8s    Ready    control-plane   45m   v1.28.0
+[SUCCESS] Cluster accessible
+
+2️⃣ Services système:
+[SUCCESS] Services kubelet et containerd actifs
+
+3️⃣ Test déploiement:
+[INFO] Création d'un pod de test...
+[SUCCESS] Pod de test démarré avec succès
+
+🎉 CLUSTER OPÉRATIONNEL !
+
+[INFO] Commandes utiles :
+  /opt/k8s-dev/kubectl.sh get nodes
+  /opt/k8s-dev/kubectl.sh get pods -A
+  /opt/k8s-dev/kubectl.sh run mon-app --image=nginx
+```
+
+#### Exemple de vérification complète
+
+```bash
+$ ./verify.sh full
+
+🔍 VÉRIFICATION COMPLÈTE KUBERNETES
+===================================
+
+[INFO] Tests en cours avec : /opt/k8s-dev/kubectl.sh
+
+🧪 Cluster accessible... ✅
+🧪 API Server santé... ✅
+🧪 Kubelet actif... ✅
+🧪 Containerd actif... ✅
+🧪 Pods système présents... ✅
+🧪 Pas de pods Pending... ✅
+🧪 Plugin réseau (flannel)... ✅
+🧪 DNS fonctionnel... ✅
+🧪 Création deployment... ✅
+🧪 Deployment ready... ✅
+🧪 Service exposure... ✅
+🧪 Service accessible... ✅
+
+📊 RÉSULTATS:
+🎉 TOUS LES TESTS RÉUSSIS ! Cluster prêt à l'emploi.
+
+[INFO] Informations du cluster :
+NAME   STATUS   ROLES           AGE   VERSION   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
+k8s    Ready    control-plane   47m   v1.28.0   Ubuntu 22.04.3 LTS   5.15.0-91-generic   containerd://1.6.12
+
+[INFO] Configuration détectée :
+  - Mode: Node
+  - Version K8s: 1.28.0
+  - Runtime: containerd
+  - Réseau: flannel
+  - Installation: /opt/k8s-dev
+```
+
+### Vérifications manuelles complémentaires
 
 #### Pour Mode 1 (Node complet) et Mode 2 (Master)
 
 ```bash
-# === VÉRIFICATION CLUSTER ===
+# État détaillé des nœuds
+[KUBECTL_SCRIPT] describe nodes
 
-# 1. Vérifier l'état des nœuds
-/opt/k8s/kubectl.sh get nodes
-# Résultat attendu : STATUS = Ready
+# Vérifier tous les pods système
+[KUBECTL_SCRIPT] get pods -A -o wide
 
-# 2. Vérifier les pods système
-/opt/k8s/kubectl.sh get pods -A
-# Résultat attendu : Tous les pods Running (sauf eventuellement quelques Pending au début)
+# Vérifier les événements récents
+[KUBECTL_SCRIPT] get events --sort-by=.metadata.creationTimestamp | tail -10
 
-# 3. Vérifier les services système
-sudo systemctl status kubelet containerd
-# Résultat attendu : active (running)
-
-# 4. Test de déploiement simple
-/opt/k8s/kubectl.sh run test-nginx --image=nginx
-/opt/k8s/kubectl.sh get pods
-# Résultat attendu : Pod test-nginx Running
-
-# 5. Nettoyer le test
-/opt/k8s/kubectl.sh delete pod test-nginx
-
-# === VÉRIFICATION RÉSEAU ===
-
-# 6. Vérifier le plugin réseau
-/opt/k8s/kubectl.sh get pods -n kube-system | grep -E "(flannel|calico|cilium)"
-# Résultat attendu : Pods réseau Running
-
-# 7. Test connectivité entre pods (si cluster ready)
-/opt/k8s/kubectl.sh run test1 --image=busybox --rm -it --restart=Never -- nslookup kubernetes.default
-# Résultat attendu : Résolution DNS fonctionnelle
-
-# === DIAGNOSTIC APPROFONDI ===
-
-# 8. Informations détaillées du cluster
-/opt/k8s/kubectl.sh cluster-info
-/opt/k8s/kubectl.sh version
-
-# 9. Vérifier les événements
-/opt/k8s/kubectl.sh get events --sort-by=.metadata.creationTimestamp
-
-# 10. Vérifier les ressources
-/opt/k8s/kubectl.sh top nodes 2>/dev/null || echo "Metrics server non installé (normal)"
+# Test de connectivité réseau avancé
+[KUBECTL_SCRIPT] run netshoot --rm -it --image=nicolaka/netshoot -- ping kubernetes.default
 ```
 
 #### Pour Mode 3 (Worker)
 
 ```bash
-# === VÉRIFICATION WORKER ===
+# Depuis le master, vérifier le worker
+kubectl get nodes -o wide
+kubectl describe node [WORKER-NAME]
 
-# 1. Vérifier que le worker est visible depuis le master
-# (à exécuter sur le master)
-kubectl get nodes
-# Résultat attendu : Nouveau worker visible avec STATUS = Ready
-
-# 2. Vérifier les services sur le worker
-sudo systemctl status kubelet containerd
-# Résultat attendu : active (running)
-
-# 3. Vérifier les pods sur le worker
-# (depuis le master)
+# Vérifier les pods déployés sur le worker
 kubectl get pods -A -o wide --field-selector spec.nodeName=[WORKER-NAME]
-
-# 4. Test de déploiement sur le worker
-# (depuis le master)
-kubectl run test-worker --image=nginx --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"[WORKER-NAME]"}}}'
-kubectl get pods -o wide
-# Résultat attendu : Pod déployé sur le worker spécifique
 ```
 
-### Scripts de vérification automatique
+### Indicateurs de santé
 
-#### Script de vérification complète (Mode 1 & 2)
+#### ✅ Cluster sain
 
-```bash
-cat > verify-cluster.sh << 'EOF'
-#!/bin/bash
-echo "=== VÉRIFICATION CLUSTER KUBERNETES ==="
+- Tous les nœuds avec STATUS "Ready"
+- Pods système en état "Running"
+- Services kubelet/containerd "active"
+- Tests de déploiement réussis
+- DNS fonctionnel
 
-echo "1. État des nœuds:"
-/opt/k8s/kubectl.sh get nodes
+#### ⚠️ Problèmes détectés
 
-echo -e "\n2. Pods système:"
-/opt/k8s/kubectl.sh get pods -n kube-system
-
-echo -e "\n3. Services système:"
-systemctl is-active kubelet containerd
-
-echo -e "\n4. Test déploiement:"
-/opt/k8s/kubectl.sh run verify-test --image=nginx --timeout=60s
-sleep 10
-/opt/k8s/kubectl.sh get pod verify-test
-/opt/k8s/kubectl.sh delete pod verify-test
-
-echo -e "\n5. Informations cluster:"
-/opt/k8s/kubectl.sh cluster-info
-
-echo -e "\n=== VÉRIFICATION TERMINÉE ==="
-EOF
-
-chmod +x verify-cluster.sh
-sudo ./verify-cluster.sh
-```
-
-#### Script de surveillance continue
-
-```bash
-cat > monitor-cluster.sh << 'EOF'
-#!/bin/bash
-echo "=== SURVEILLANCE CLUSTER (Ctrl+C pour arrêter) ==="
-
-while true; do
-    clear
-    echo "=== $(date) ==="
-    echo "Nœuds:"
-    /opt/k8s/kubectl.sh get nodes
-
-    echo -e "\nPods (non-système):"
-    /opt/k8s/kubectl.sh get pods
-
-    echo -e "\nServices:"
-    /opt/k8s/kubectl.sh get services
-
-    echo -e "\nÉvénements récents:"
-    /opt/k8s/kubectl.sh get events --sort-by=.metadata.creationTimestamp | tail -5
-
-    sleep 30
-done
-EOF
-
-chmod +x monitor-cluster.sh
-./monitor-cluster.sh
-```
+- Nœuds "NotReady"
+- Pods système "Pending" ou "CrashLoopBackOff"
+- Échec des tests de déploiement
+- Services inactifs
 
 ## 🔧 Maintenance
 
 ### Utilisation quotidienne
 
 ```bash
-# Méthode 1 : Script personnalisé
-/opt/k8s/kubectl.sh get nodes
-/opt/k8s/kubectl.sh get pods --all-namespaces
+# Vérification rapide de l'état
+./verify.sh quick
 
-# Méthode 2 : Kubectl standard (après setup)
-/opt/k8s/setup-kubectl.sh
-kubectl get nodes
-kubectl get pods --all-namespaces
+# État détaillé du cluster
+[KUBECTL_SCRIPT] get nodes,pods,services -A
 
 # Déployer une application
-kubectl create deployment nginx --image=nginx
-kubectl expose deployment nginx --port=80 --type=NodePort
+[KUBECTL_SCRIPT] create deployment nginx --image=nginx
+[KUBECTL_SCRIPT] expose deployment nginx --port=80 --type=NodePort
 
 # Voir les services
-kubectl get services
+[KUBECTL_SCRIPT] get services
+```
+
+### Surveillance continue
+
+```bash
+# Créer un script de monitoring
+cat > monitor-k8s.sh << 'EOF'
+#!/bin/bash
+while true; do
+    clear
+    echo "=== $(date) ==="
+    ./verify.sh quick
+    echo -e "\nProchaine vérification dans 5 minutes..."
+    sleep 300
+done
+EOF
+
+chmod +x monitor-k8s.sh
+./monitor-k8s.sh
 ```
 
 ### Ajouter un worker
@@ -650,32 +779,30 @@ kubeadm token create --print-join-command
 # 3. Installer le worker
 sudo ./install-k8s.sh
 # Choisir: 3 (Worker seul)
+
+# 4. Vérifier depuis le master
+kubectl get nodes
 ```
 
 ### Backup manuel (Master)
 
 ```bash
 # Backup etcd
-/opt/k8s/backup-etcd.sh
+[INSTALL_PATH]/backup-etcd.sh
 
 # Vérifier les backups
-ls -la /opt/k8s/backups/
+ls -la [INSTALL_PATH]/backups/
 ```
 
-### Surveillance
+### Surveillance des logs
 
 ```bash
-# Status des services
-systemctl status kubelet
-systemctl status containerd
-
 # Logs des services
 journalctl -u kubelet -f
 journalctl -u containerd -f
 
-# Métriques du cluster
-/opt/k8s/kubectl.sh top nodes 2>/dev/null
-/opt/k8s/kubectl.sh top pods 2>/dev/null
+# Logs des pods
+[KUBECTL_SCRIPT] logs -n kube-system [pod-name] -f
 ```
 
 ## 🧹 Reset et nettoyage
@@ -698,6 +825,23 @@ sudo ./reset-k8s.sh
 - ✅ Préservation de la connectivité SSH
 - ✅ Option de désinstallation des packages
 - ✅ Réactivation optionnelle du swap
+
+### Workflow complet : Reset → Réinstall → Vérify
+
+```bash
+# 1. Reset complet
+sudo ./reset-k8s.sh
+
+# 2. Réinstallation
+sudo ./install-k8s.sh
+
+# 3. Vérification de la nouvelle installation
+./verify.sh full
+
+# 4. Si problème détecté, diagnostic
+./verify.sh detect  # Voir les installations trouvées
+tail -f install-*.log  # Voir les logs d'installation
+```
 
 ### Reset manuel (si script non disponible)
 
@@ -732,9 +876,27 @@ sudo find / -name "*kube*" -type d 2>/dev/null | grep -v proc | grep -v snap
 
 # 2. Réinstaller
 sudo ./install-k8s.sh
+
+# 3. Vérifier la nouvelle installation
+./verify.sh
 ```
 
 ## 🐛 Dépannage
+
+### Diagnostic avec verify.sh
+
+Le script `verify.sh` est votre premier outil de diagnostic :
+
+```bash
+# Diagnostic rapide
+./verify.sh quick
+
+# Si problème détecté, diagnostic complet
+./verify.sh full
+
+# Voir toutes les installations
+./verify.sh detect
+```
 
 ### Problèmes courants
 
@@ -755,17 +917,18 @@ tail -50 install-*.log
 #### Cluster non disponible après installation
 
 ```bash
-# Utiliser le script de diagnostic intégré
-/opt/k8s/kubectl.sh get nodes
-# Le script tentera une auto-réparation
+# Utiliser verify.sh pour diagnostic
+./verify.sh full
 
-# Ou vérifier manuellement
-sudo systemctl status kubelet containerd
+# Le script affichera les erreurs spécifiques et proposera des solutions
+# Exemple de sortie d'erreur:
+# 🧪 Cluster accessible... ❌
+# 🧪 Kubelet actif... ❌
+#   Détails: inactive
+
+# Puis corriger selon les indications
 sudo systemctl restart kubelet
-
-# Vérifier la configuration
-ls -la /opt/k8s/
-cat /opt/k8s/kubeconfig.yaml
+./verify.sh quick  # Re-tester
 ```
 
 #### Worker ne rejoint pas le cluster
@@ -774,6 +937,9 @@ cat /opt/k8s/kubeconfig.yaml
 # Sur le worker, vérifier la connectivité
 ping [MASTER_IP]
 telnet [MASTER_IP] 6443
+
+# Utiliser verify.sh sur le worker pour voir le problème
+./verify.sh detect  # Voir si l'installation est détectée
 
 # Vérifier le token (expire après 24h)
 # Sur le master, générer un nouveau token :
@@ -787,30 +953,41 @@ sudo ./reset-k8s.sh
 #### Pods en état Pending
 
 ```bash
-# Vérifier les nœuds
-/opt/k8s/kubectl.sh get nodes
+# Diagnostic avec verify.sh
+./verify.sh full
+# Rechercher la ligne: 🧪 Pas de pods Pending... ❌
 
-# Vérifier les ressources
-/opt/k8s/kubectl.sh describe nodes
+# Diagnostic manuel
+[KUBECTL_SCRIPT] get nodes
+[KUBECTL_SCRIPT] describe nodes
 
 # Pour un cluster single-node, vérifier le taint
-/opt/k8s/kubectl.sh describe nodes | grep -i taint
+[KUBECTL_SCRIPT] describe nodes | grep -i taint
 
 # Si taint présent, le supprimer
-/opt/k8s/kubectl.sh taint nodes --all node-role.kubernetes.io/control-plane-
+[KUBECTL_SCRIPT] taint nodes --all node-role.kubernetes.io/control-plane-
 ```
 
 #### Réseau non fonctionnel
 
 ```bash
-# Vérifier le plugin réseau
-/opt/k8s/kubectl.sh get pods -n kube-system | grep -E "(flannel|calico|cilium)"
+# verify.sh détectera automatiquement les problèmes réseau
+./verify.sh full
+# Rechercher les lignes:
+# 🧪 Plugin réseau (flannel)... ❌
+# 🧪 DNS fonctionnel... ❌
+
+# Diagnostic manuel du réseau
+[KUBECTL_SCRIPT] get pods -n kube-system | grep -E "(flannel|calico|cilium)"
 
 # Redémarrer les pods réseau
-/opt/k8s/kubectl.sh delete pods -n kube-system -l app=flannel
+[KUBECTL_SCRIPT] delete pods -n kube-system -l app=flannel
 
 # Si problème persiste, réinstaller le plugin
-/opt/k8s/kubectl.sh apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+[KUBECTL_SCRIPT] apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+
+# Re-tester
+./verify.sh quick
 ```
 
 #### Script reset a cassé le réseau
@@ -825,6 +1002,21 @@ sudo dhclient -r && sudo dhclient
 sudo reboot
 ```
 
+#### Multiple installations détectées
+
+```bash
+# verify.sh gère automatiquement les installations multiples
+./verify.sh
+
+# Si confusion entre les installations
+./verify.sh detect  # Voir toutes les installations
+ls -la /opt/k8s*    # Vérifier physiquement
+
+# Nettoyer les installations inutiles
+sudo rm -rf /opt/k8s-old
+sudo ./reset-k8s.sh  # Pour un nettoyage complet
+```
+
 ### Logs de diagnostic
 
 ```bash
@@ -836,10 +1028,10 @@ sudo journalctl -u kubelet --since "1 hour ago" --no-pager
 sudo journalctl -u containerd --since "1 hour ago" --no-pager
 
 # Logs des pods
-/opt/k8s/kubectl.sh logs -n kube-system [pod-name]
+[KUBECTL_SCRIPT] logs -n kube-system [pod-name]
 
 # Événements du cluster
-/opt/k8s/kubectl.sh get events --sort-by=.metadata.creationTimestamp
+[KUBECTL_SCRIPT] get events --sort-by=.metadata.creationTimestamp
 ```
 
 ### Commandes de diagnostic système
@@ -856,7 +1048,30 @@ ip link show | grep -E "(flannel|cni)"
 
 # Utilisation des ressources
 free -h
-df -h /var/lib/kubelet /opt/k8s
+df -h /var/lib/kubelet /opt/k8s*
+```
+
+### Workflow de dépannage recommandé
+
+```bash
+# 1. Diagnostic initial avec verify.sh
+./verify.sh full
+
+# 2. Si échecs détectés, voir les détails
+./verify.sh detect  # Vérifier les installations
+tail -20 install-*.log  # Voir les logs récents
+
+# 3. Corriger les problèmes identifiés
+sudo systemctl restart kubelet containerd
+[KUBECTL_SCRIPT] get pods -A  # Vérifier l'état
+
+# 4. Re-tester
+./verify.sh quick
+
+# 5. Si problème persiste, reset complet
+sudo ./reset-k8s.sh
+sudo ./install-k8s.sh
+./verify.sh full
 ```
 
 ## 📞 Support et contribution
@@ -864,37 +1079,139 @@ df -h /var/lib/kubelet /opt/k8s
 ### Informations utiles pour le support
 
 ```bash
-# Version du script
+# Version des scripts
 head -5 install-k8s.sh
+head -5 verify.sh
 
 # Configuration système
 cat /etc/os-release
 free -h
 df -h
 
-# Status Kubernetes
-/opt/k8s/kubectl.sh version --short 2>/dev/null
-/opt/k8s/kubectl.sh get nodes -o wide 2>/dev/null
+# Status Kubernetes avec verify.sh
+./verify.sh detect
+./verify.sh full > cluster-diagnostic.txt
 ```
 
 ### Logs à fournir en cas de problème
 
-1. **Log d'installation** : `install-*.log`
-2. **Configuration utilisée** : `[mode]-*.conf`
-3. **Status système** : `systemctl status kubelet containerd`
-4. **Informations cluster** : `/opt/k8s/kubectl.sh get nodes,pods --all-namespaces`
-5. **Événements récents** : `/opt/k8s/kubectl.sh get events --sort-by=.metadata.creationTimestamp`
+1. **Sortie de verify.sh** : `./verify.sh full > diagnostic.txt`
+2. **Log d'installation** : `install-*.log`
+3. **Configuration utilisée** : `[mode]-*.conf`
+4. **Status système** : `systemctl status kubelet containerd`
+5. **Informations cluster** : Output de verify.sh
+6. **Événements récents** : `[KUBECTL_SCRIPT] get events --sort-by=.metadata.creationTimestamp`
 
 ### Processus de contribution
 
 ```bash
-# Avant de contribuer, tester sur un environnement propre
+# Avant de contribuer, tester le workflow complet
 sudo ./reset-k8s.sh
 sudo ./install-k8s.sh
+./verify.sh full
 
-# Vérifier que tout fonctionne
-./verify-cluster.sh
+# Vérifier que tous les scripts fonctionnent
+./verify.sh quick
+./verify.sh detect
+./verify.sh help
 ```
+
+### Template de rapport de bug
+
+```bash
+# Générer un rapport complet automatiquement
+cat > bug-report.sh << 'EOF'
+#!/bin/bash
+echo "=== BUG REPORT KUBERNETES INSTALLER ==="
+echo "Date: $(date)"
+echo "User: $(whoami)"
+echo "Host: $(hostname)"
+echo
+
+echo "=== SYSTEM INFO ==="
+cat /etc/os-release
+echo "RAM: $(free -h | grep Mem)"
+echo "Disk: $(df -h / | tail -1)"
+echo
+
+echo "=== VERIFY.SH OUTPUT ==="
+./verify.sh detect
+echo
+./verify.sh full
+
+echo -e "\n=== RECENT LOGS ==="
+tail -20 install-*.log 2>/dev/null || echo "No install logs found"
+
+echo -e "\n=== SYSTEM SERVICES ==="
+systemctl status kubelet containerd --no-pager
+
+echo -e "\n=== NETWORK INTERFACES ==="
+ip link show | grep -E "(flannel|cni|docker)" || echo "No k8s network interfaces"
+EOF
+
+chmod +x bug-report.sh
+./bug-report.sh > my-bug-report.txt
+```
+
+## 📚 Guide de référence rapide
+
+### Commandes essentielles
+
+```bash
+# Installation
+sudo ./install-k8s.sh
+
+# Vérification rapide
+./verify.sh quick
+
+# Vérification complète
+./verify.sh full
+
+# Reset complet
+sudo ./reset-k8s.sh
+
+# Utilisation du cluster (adapté automatiquement)
+[KUBECTL_SCRIPT] get nodes
+[KUBECTL_SCRIPT] get pods -A
+[KUBECTL_SCRIPT] run test --image=nginx
+```
+
+### Résolution de problèmes rapide
+
+| Problème                 | Solution rapide                                                             |
+| ------------------------ | --------------------------------------------------------------------------- |
+| Cluster non accessible   | `./verify.sh full` puis suivre les indications                              |
+| Pods Pending             | `[KUBECTL_SCRIPT] taint nodes --all node-role.kubernetes.io/control-plane-` |
+| Réseau ne fonctionne pas | `[KUBECTL_SCRIPT] delete pods -n kube-system -l app=flannel`                |
+| Services inactifs        | `sudo systemctl restart kubelet containerd`                                 |
+| Installation multiple    | `./verify.sh detect` puis choisir                                           |
+| Reset cassé le réseau    | `sudo reboot` (accès physique requis)                                       |
+
+### Fichiers importants par installation
+
+```bash
+# Scripts générés automatiquement
+/opt/k8s*/kubectl.sh               # Script kubectl personnalisé
+/opt/k8s*/setup-kubectl.sh         # Configuration kubectl standard
+/opt/k8s*/kubeconfig.yaml          # Configuration cluster
+
+# Logs et infos
+install-*.log                      # Logs d'installation
+master-info-*.txt                  # Infos de jointure (master)
+
+# Maintenance
+/opt/k8s*/backup-etcd.sh          # Backup etcd (si activé)
+/opt/k8s*/join-worker.sh          # Script jointure worker
+```
+
+### Ports et services clés
+
+| Service    | Port      | Description              |
+| ---------- | --------- | ------------------------ |
+| API Server | 6443      | Interface principale K8s |
+| etcd       | 2379-2380 | Base de données cluster  |
+| kubelet    | 10250     | Agent sur chaque nœud    |
+| kube-proxy | 10256     | Proxy réseau             |
 
 ---
 
@@ -906,17 +1223,32 @@ Ce script vous permet de déployer Kubernetes facilement dans tous vos environne
 - **🏢 Production** : Clusters HA avec sécurité renforcée et backup automatique
 - **⚙️ Expansion** : Ajout facile de workers avec gestion d'erreurs robuste
 - **🧹 Maintenance** : Reset sécurisé sans casser votre connexion réseau
+- **🔍 Vérification** : Script générique qui s'adapte à toutes vos installations
 
 **Nouvelles fonctionnalités :**
 
 - ✅ Script de reset sécurisé préservant SSH
 - ✅ Gestion d'erreurs robuste avec retry automatique
 - ✅ Deux méthodes d'utilisation kubectl (personnalisée + standard)
-- ✅ Scripts de vérification automatique
+- ✅ **Script de vérification générique verify.sh**
+- ✅ **Détection automatique des installations multiples**
+- ✅ **Récupération automatique de la configuration d'origine**
 - ✅ Diagnostic intégré et auto-réparation
+- ✅ **Interface interactive et utilisation en ligne de commande**
+
+**Workflow recommandé :**
+
+1. **Installation** : `sudo ./install-k8s.sh`
+2. **Vérification** : `./verify.sh`
+3. **Utilisation** : Scripts kubectl générés automatiquement
+4. **Maintenance** : `./verify.sh quick` régulièrement
+5. **Reset si besoin** : `sudo ./reset-k8s.sh`
+
+**Le script verify.sh est votre outil principal** pour :
+
+- ✅ Vérifier l'état de vos clusters
+- ✅ Diagnostiquer les problèmes
+- ✅ Gérer plusieurs installations
+- ✅ Adapter automatiquement les tests à votre configuration
 
 **Bon déploiement Kubernetes !** 🚀
-
----
-
-_Documentation mise à jour : Janvier 2025_
